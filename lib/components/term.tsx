@@ -28,7 +28,10 @@ const isWebgl2Supported = (() => {
   return () => {
     if (isSupported === undefined) {
       const canvas = document.createElement('canvas');
-      const gl = canvas.getContext('webgl2', {depth: false, antialias: false});
+      const gl = canvas.getContext('webgl2', {
+        depth: false,
+        antialias: false
+      });
       isSupported = gl instanceof window.WebGL2RenderingContext;
     }
     return isSupported;
@@ -94,6 +97,7 @@ export default class Term extends React.PureComponent<TermProps> {
   term!: Terminal;
   resizeObserver!: ResizeObserver;
   resizeTimeout!: NodeJS.Timeout;
+  webViewRef: any | null;
   constructor(props: TermProps) {
     super(props);
     props.ref_(props.uid, this);
@@ -161,7 +165,12 @@ export default class Term extends React.PureComponent<TermProps> {
       this.term.loadAddon(
         new WebLinksAddon(
           (event: MouseEvent | undefined, uri: string) => {
-            if (shallActivateWebLink(event)) void shell.openExternal(uri);
+            // if (shallActivateWebLink(event)) void shell.openExternal(uri);
+            store.dispatch({
+              type: 'SESSION_URL_SET',
+              uid: props.uid,
+              url: uri
+            });
           },
           {
             // prevent default electron link handling to allow selection, e.g. via double-click
@@ -425,6 +434,29 @@ export default class Term extends React.PureComponent<TermProps> {
     });
   }
 
+  setWebViewRef = (webView: any) => {
+    const oldRef = this.webViewRef;
+    this.webViewRef = webView;
+
+    if (!oldRef && webView) {
+      setTimeout(() => {
+        const wc = remote.webContents.fromId(webView.getWebContentsId());
+        wc.setIgnoreMenuShortcuts(true);
+        wc.on('before-input-event', (_event, input) => {
+          if (input.type === 'keyDown') {
+            if (input.key === 'r' && input.meta) {
+              webView.reload();
+            } else if (input.key === '=' && input.meta) {
+              wc.setZoomLevel(wc.getZoomLevel() + 1);
+            } else if (input.key === '-' && input.meta) {
+              wc.setZoomLevel(wc.getZoomLevel() - 1);
+            }
+          }
+        });
+      }, 10);
+    }
+  };
+
   render() {
     return (
       <div
@@ -432,18 +464,36 @@ export default class Term extends React.PureComponent<TermProps> {
         style={{padding: this.props.padding}}
         onMouseUp={this.onMouseUp}
       >
-        {this.props.customChildrenBefore}
-        <div ref={this.onTermWrapperRef} className="term_fit term_wrapper" />
-        {this.props.customChildren}
-        {this.props.search ? (
-          <SearchBox
-            search={this.search}
-            next={this.searchNext}
-            prev={this.searchPrevious}
-            close={this.closeSearchBox}
+        {this.props.url ? (
+          <webview
+            ref={this.setWebViewRef}
+            src={this.props.url}
+            style={{
+              background: '#fff',
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              display: 'inline-flex',
+              width: '100%',
+              height: '100%'
+            }}
           />
         ) : (
-          ''
+          <>
+            {this.props.customChildrenBefore}
+            <div ref={this.onTermWrapperRef} className="term_fit term_wrapper" />
+            {this.props.customChildren}
+            {this.props.search ? (
+              <SearchBox
+                search={this.search}
+                next={this.searchNext}
+                prev={this.searchPrevious}
+                close={this.closeSearchBox}
+              />
+            ) : (
+              ''
+            )}
+          </>
         )}
 
         <style jsx global>{`
